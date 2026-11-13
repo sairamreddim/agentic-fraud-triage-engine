@@ -96,6 +96,19 @@ def run_heuristic_triage(df):
     print(f"[*] Filtered {len(df):,} total transactions down to {len(triage_queue)} flagged case(s) for AI review.")
     return df, triage_queue
 
+def run_tier1_filtering(csv_path="large_transactions.csv"):
+    """Tier 1: Balanced precision filtering of 100,000 rows."""
+    print(f"[*] Loading and scanning {csv_path} with Pandas...")
+    df = pd.read_csv(csv_path)
+    
+    # Balanced rule: Amount > $1,000 OR ($500+ in high-risk categories)
+    flagged_df = df[
+        (df['amount'] > 1000.0) | 
+        ((df['amount'] > 500.0) & (df['merchant_category'].isin(['jewelry', 'travel', 'electronics'])))
+    ]
+    
+    print(f"[+] Tier 1 complete: Filtered {len(df):,} total rows down to a manageable squad of {len(flagged_df):,} anomalies for AI review.")
+    return flagged_df
 
 # ==========================================
 # TOOL DEFINITIONS & FUNCTIONS
@@ -288,3 +301,10 @@ if __name__ == "__main__":
 
 
 export_dashboard_data()
+
+if __name__ == "__main__":
+    init_database()
+    suspects_df = run_tier1_filtering()
+    
+    # Take the top few flagged anomalies to pass into your multi-turn Groq agent loop
+    print(f"[*] Ready to pass {len(suspects_df)} anomalies into the Groq multi-turn agent loop for cognitive triage.")
