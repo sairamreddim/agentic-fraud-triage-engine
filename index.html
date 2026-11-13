@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraud Ops AI | Investigation & Triage Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Loads the exported SQLite data -->
+    <script src="dashboard_data.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen">
+
+    <!-- Top Navigation -->
+    <nav class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></div>
+                <h1 class="text-xl font-bold tracking-tight text-white">SentinelAI <span class="text-slate-400 font-normal">| Fraud Triage Operations</span></h1>
+            </div>
+            <span class="text-xs font-mono bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700">
+                Audit Source: fraud_audit.db
+            </span>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-6 py-8">
+        
+        <!-- KPI Metrics Row -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <p class="text-xs uppercase tracking-wider text-slate-400">Total Flagged Cases</p>
+                <p id="kpi-total" class="text-3xl font-bold text-white mt-1">0</p>
+            </div>
+            <div class="bg-slate-900 border border-amber-500/30 p-5 rounded-xl">
+                <p class="text-xs uppercase tracking-wider text-amber-400">Manual Review Queue</p>
+                <p id="kpi-review" class="text-3xl font-bold text-amber-400 mt-1">0</p>
+            </div>
+            <div class="bg-slate-900 border border-rose-500/30 p-5 rounded-xl">
+                <p class="text-xs uppercase tracking-wider text-rose-400">High Risk / Blocked</p>
+                <p id="kpi-block" class="text-3xl font-bold text-rose-400 mt-1">0</p>
+            </div>
+            <div class="bg-slate-900 border border-emerald-500/30 p-5 rounded-xl">
+                <p class="text-xs uppercase tracking-wider text-emerald-400">Auto-Approved</p>
+                <p id="kpi-approve" class="text-3xl font-bold text-emerald-400 mt-1">0</p>
+            </div>
+        </div>
+
+        <!-- Main Workspace Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Queue List -->
+            <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+                    <h2 class="font-semibold text-slate-200">Investigation Queue</h2>
+                    <select id="filter-status" class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none">
+                        <option value="ALL">All Verdicts</option>
+                        <option value="REVIEW">Review Needed</option>
+                        <option value="BLOCK">Blocked</option>
+                        <option value="APPROVE">Approved</option>
+                    </select>
+                </div>
+                <div id="ticket-list" class="divide-y divide-slate-800/80 max-h-[600px] overflow-y-auto">
+                    <!-- Tickets injected by JS -->
+                </div>
+            </div>
+
+            <!-- Right AI Investigation Report Viewer -->
+            <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-6">
+                <div id="report-placeholder" class="h-full flex flex-col items-center justify-center text-center py-20 text-slate-500">
+                    <p class="text-lg font-medium text-slate-400">Select a flagged transaction from the queue</p>
+                    <p class="text-sm mt-1">View the multi-tool evidence, risk rationale, and audit log.</p>
+                </div>
+
+                <div id="report-content" class="hidden">
+                    <div class="flex flex-wrap justify-between items-start gap-4 pb-4 border-b border-slate-800 mb-6">
+                        <div>
+                            <div class="flex items-center space-x-3">
+                                <h3 id="detail-txn" class="text-2xl font-bold text-white">TXN-000000</h3>
+                                <span id="detail-badge" class="px-2.5 py-0.5 text-xs font-semibold rounded-full">REVIEW</span>
+                            </div>
+                            <p id="detail-meta" class="text-sm text-slate-400 mt-1">Card: CARD-000 • Category: jewelry • Timestamp</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-xs text-slate-400 uppercase">Flagged Amount</p>
+                            <p id="detail-amount" class="text-2xl font-mono font-bold text-white">$0.00</p>
+                        </div>
+                    </div>
+
+                    <!-- Markdown Rendered AI Report -->
+                    <div id="detail-markdown" class="prose prose-invert prose-sm max-w-none text-slate-300 space-y-3 leading-relaxed">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Fallback sample data in case dashboard_data.js hasn't been generated yet
+        const fallbackData = [
+            {
+                transaction_id: "TXN-100010",
+                card_id: "CARD-007",
+                timestamp: "2026-11-01 00:20:00",
+                amount: 1250.00,
+                merchant_category: "jewelry",
+                ai_recommendation: "REVIEW",
+                full_report: "### Investigation Summary\nRun `python3 fraud_engine.py` with `export_dashboard_data()` enabled to load your live SQLite database records here!"
+            }
+        ];
+
+        const records = (typeof AUDIT_DATA !== 'undefined' && AUDIT_DATA.length > 0) ? AUDIT_DATA : fallbackData;
+
+        function getBadgeStyle(rec) {
+            if (rec === 'BLOCK') return 'bg-rose-500/10 text-rose-400 border border-rose-500/30';
+            if (rec === 'APPROVE') return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+            return 'bg-amber-500/10 text-amber-400 border border-amber-500/30';
+        }
+
+        function updateKPIs(data) {
+            document.getElementById('kpi-total').textContent = data.length;
+            document.getElementById('kpi-review').textContent = data.filter(r => r.ai_recommendation === 'REVIEW').length;
+            document.getElementById('kpi-block').textContent = data.filter(r => r.ai_recommendation === 'BLOCK').length;
+            document.getElementById('kpi-approve').textContent = data.filter(r => r.ai_recommendation === 'APPROVE').length;
+        }
+
+        function renderTickets(filter = 'ALL') {
+            const listEl = document.getElementById('ticket-list');
+            listEl.innerHTML = '';
+
+            const filtered = filter === 'ALL' ? records : records.filter(r => r.ai_recommendation === filter);
+
+            filtered.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'p-4 hover:bg-slate-800/60 cursor-pointer transition flex justify-between items-center';
+                div.innerHTML = `
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="font-mono font-semibold text-white">${item.transaction_id}</span>
+                            <span class="text-xs text-slate-400">• ${item.card_id}</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-1 capitalize">${item.merchant_category} • ${item.timestamp}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-mono font-semibold text-slate-200">$${Number(item.amount).toFixed(2)}</p>
+                        <span class="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded ${getBadgeStyle(item.ai_recommendation)}">
+                            ${item.ai_recommendation}
+                        </span>
+                    </div>
+                `;
+                div.onclick = () => showReport(item);
+                listEl.appendChild(div);
+            });
+
+            if (filtered.length > 0) showReport(filtered[0]);
+        }
+
+        function showReport(item) {
+            document.getElementById('report-placeholder').classList.add('hidden');
+            document.getElementById('report-content').classList.remove('hidden');
+
+            document.getElementById('detail-txn').textContent = item.transaction_id;
+            document.getElementById('detail-amount').textContent = `$${Number(item.amount).toFixed(2)}`;
+            document.getElementById('detail-meta').textContent = `Card: ${item.card_id} • Category: ${item.merchant_category} • ${item.timestamp}`;
+
+            const badge = document.getElementById('detail-badge');
+            badge.textContent = item.ai_recommendation;
+            badge.className = `px-2.5 py-0.5 text-xs font-semibold rounded-full ${getBadgeStyle(item.ai_recommendation)}`;
+
+            document.getElementById('detail-markdown').innerHTML = marked.parse(item.full_report);
+        }
+
+        document.getElementById('filter-status').addEventListener('change', (e) => renderTickets(e.target.value));
+
+        updateKPIs(records);
+        renderTickets();
+    </script>
+</body>
+</html>
